@@ -19,10 +19,12 @@ class Barrier:
         self.flash_timer = 0.0
         self.flash_color = (255,255,255)
         self.swirl_angle = 0.0
+        self.charge_speed = 0.26 ## I am making it all about myself,but 26 is special because it is between a perfect square and perfect cube + my birthday
+        self.barrier_height = random.uniform(0.5,2.0)
 
     def update(self, dt):
         if self.state == "CHARGING":
-            self.charge = min(1.0, self.charge + dt * 0.7)
+            self.charge = min(1.0, self.charge + dt * self.charge_speed)
         if self.flash_timer > 0:
             self.flash_timer -= dt
         self.swirl_angle += dt * (7 + self.charge * 10)
@@ -41,6 +43,8 @@ class Barrier:
                 self.flash_color = (200, 60, 70)
         self.state = "IDLE"
         self.charge = 0.0
+        self.charge_speed = random.uniform(0.15,2.25)
+        self.barrier_height = random.uniform(0.5,2.0)
         return success
 
     def draw(self, surf):
@@ -66,7 +70,7 @@ class Barrier:
     def probability(self):
         width_units = self.width_px /30
         energy = self.charge * 1.4
-        deficit = max(0.001, 1.0 - energy)
+        deficit = max(0.001, self.barrier_height - energy)
         T = math.exp(-2 * width_units * math.sqrt(deficit))
         return max(0.02, min(0.98, T))
 
@@ -108,9 +112,27 @@ running = True
 was_near = False
 near_barrier = False
 shake = 0.0
+time_left = random.uniform(19.0, 43.0)
+score = 0
+game_over = False
+
+def reset_game():
+    global time_left, score, game_over, player
+    time_left = random.uniform(19.0, 43.0)
+    score = 0
+    game_over = False
+    player.x = 120
+    player.y = HEIGHT * 0.6
+
 
 while running:
     dt = clock.tick(60)/ 1000.0
+
+    if not game_over:
+        time_left -= dt
+        if time_left <= 0:
+            time_left = 0
+            game_over = True
 
     active_barrier = None
     near_barrier = False
@@ -123,19 +145,21 @@ while running:
         if event.type == pygame.QUIT:
             running = False
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-             if active_barrier:
+             if active_barrier and not game_over:
                  active_barrier.start_charging()
         elif event.type == pygame.KEYUP and event.key == pygame.K_SPACE:
-            if active_barrier:
-                success = active_barrier.start_charging()
-            if active_barrier and active_barrier.stop_charging():
+            if active_barrier and not game_over and active_barrier.stop_charging():
                 if player.x < active_barrier.x:
                     player.x = active_barrier.x + active_barrier.width_px / 2 + player.radius + 5
                 else:
                     player.x = active_barrier.x - active_barrier.width_px / 2 - player.radius - 5
+                score += 1
             else:
                 shake = 0.26 ##Is a better number than my birthday?
-
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_p: ##Instead of going with english restart starting with R, i went with hindi
+                    if game_over:
+                        reset_game()
+                     
     keys = pygame.key.get_pressed()
     player.update(dt, keys)
     for b in barriers:
@@ -161,6 +185,13 @@ while running:
         screen.blit(text, (16,16))
         ptext = font.render(f"P(tunnel): {active_barrier.probability()*100:.0f}%", True, (220, 220, 230))
         screen.blit(ptext, (16, 40))
+
+        timer_text = font.render(f"time: {time_left:.1f} score; {score}", True, (217, 219, 231))
+        screen.blit(timer_text, (WIDTH - 220, 16))
+        
+        if game_over:    
+            over_text = font.render(f"Sorry, Time is always limited ! - final score: {score} (press P to restart)", True, (253, 221, 149))
+            screen.blit(over_text, (WIDTH // 2 - 347, HEIGHT // 2))
     pygame.display.flip()
 
 pygame.quit()
