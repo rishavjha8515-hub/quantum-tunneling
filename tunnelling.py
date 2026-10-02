@@ -4,7 +4,7 @@ import random
 
 pygame.init()
 
-WIDTH, HEIGHT = 808,448
+WIDTH, HEIGHT = 999,448
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("DOREMON'S QUANTUM TUNNEL")
 clock = pygame.time.Clock()
@@ -47,8 +47,8 @@ class Barrier:
         self.barrier_height = random.uniform(0.5,2.0)
         return success
 
-    def draw(self, surf):
-        rect = pygame.Rect(self.x - self.width_px // 2, HEIGHT * 0.26, self.width_px, HEIGHT * 0.54)
+    def draw(self, surf, camera_x):
+        rect = pygame.Rect(self.x - camera_x - self.width_px // 2, HEIGHT * 0.26, self.width_px, HEIGHT * 0.54)
         cold = (96, 200, 246)
         hot = (255, 99, 68)
         color = (
@@ -63,7 +63,7 @@ class Barrier:
         num_dots = 7
         for i in range(num_dots):
             dot_angle = self.swirl_angle + (i / num_dots) * math.tau
-            orbit_x = self.x + math.cos(dot_angle) * 30
+            orbit_x = self.x - camera_x + math.cos(dot_angle) * 30
             orbit_y = HEIGHT * 0.55 + math.sin(dot_angle) * 30
             pygame.draw.circle(surf, (255, 255, 255), (int(orbit_x), int(orbit_y)), 4)
 
@@ -74,10 +74,15 @@ class Barrier:
         T = math.exp(-2 * width_units * math.sqrt(deficit))
         return max(0.02, min(0.98, T))
 
-barrier1 = Barrier(x=456, width_px=48)
-barrier2 = Barrier(x=664, width_px=96)#Took 560 as midpoint to change x for both and changed width values to make new barrier 2x of earlier
-barriers = [barrier1, barrier2]
-## I would suggest to experiment with width here, as it changes the baseline proability.
+NUM_BARRIERS = 5
+barriers = []
+for i in range(NUM_BARRIERS):
+    x = 440 + i * 220
+    width = random.uniform(40, 140)
+    barriers.append(Barrier(x=x, width_px=width))
+## No need to experiment with width,as randomized barriers will generate barriers of different width giving different baseline proabability.
+
+WORLD_END = barriers[-1].x + 325
 
 class Player:
     def __init__(self, x, y):
@@ -93,16 +98,17 @@ class Player:
              self.x -= self.speed * dt
         if keys[pygame.K_RIGHT]:
              self.x += self.speed * dt
+        self.x = max(20, min(WORLD_END, self.x))
         if self.stretch_timer > 0:
             self.stretch_timer -= dt
 
-    def draw(self, surf):
+    def draw(self, surf, camera_x):
         w = self.radius * 2
         h = self.radius * 2
         if self.stretch_timer > 0:
             w = self.radius * 2 * 1.6
 
-        left = self.x - w / 2
+        left = self.x - camera_x - w / 2
         top = self.y - h / 2
         pygame.draw.ellipse(surf, (230, 230, 240), (left, top, w, h))
 
@@ -115,6 +121,7 @@ shake = 0.0
 time_left = random.uniform(19.0, 43.0)
 score = 0
 game_over = False
+camera_x = 0.0
 
 def reset_game():
     global time_left, score, game_over, player
@@ -162,6 +169,10 @@ while running:
                      
     keys = pygame.key.get_pressed()
     player.update(dt, keys)
+
+    camera_x = player.x - WIDTH / 2
+    camera_x = max(0, camera_x)
+    camera_x = min(camera_x, WORLD_END - WIDTH)
     for b in barriers:
         b.update(dt)
 
@@ -174,10 +185,10 @@ while running:
     screen.fill((12, 14, 26))
     for b in barriers:
         b.x += shake_x
-        b.draw(screen)
+        b.draw(screen, camera_x)
         b.x -= shake_x
     player.x += shake_x
-    player.draw(screen)
+    player.draw(screen, camera_x)
     player.x -= shake_x
 
     if active_barrier:
@@ -190,7 +201,7 @@ while running:
         screen.blit(timer_text, (WIDTH - 220, 16))
         
         if game_over:    
-            over_text = font.render(f"Sorry, Time is always limited ! - final score: {score} (press P to restart)", True, (253, 221, 149))
+            over_text = font.render(f"Sorry, Time is always limited ! - final score: {score} (press P to restart)", True, (255, 0, 255)) #I had to replace yellow with hot magenta pink because of visibilty issue,i tried bright yell,green and then the current color
             screen.blit(over_text, (WIDTH // 2 - 347, HEIGHT // 2))
     pygame.display.flip()
 
