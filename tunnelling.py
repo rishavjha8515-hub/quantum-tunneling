@@ -21,21 +21,30 @@ class Barrier:
         self.swirl_angle = 0.0
         self.charge_speed = 0.26 ## I am making it all about myself,but 26 is special because it is between a perfect square and perfect cube + my birthday
         self.barrier_height = random.uniform(0.5,2.0)
+        self.observed_this_charge = False
 
-    def update(self, dt):
+    def update(self, dt, observing):
         if self.state == "CHARGING":
             self.charge = min(1.0, self.charge + dt * self.charge_speed)
+            if observing:
+                self.observed_this_charge = True
         if self.flash_timer > 0:
             self.flash_timer -= dt
         self.swirl_angle += dt * (7 + self.charge * 10)
 
     def start_charging(self):
         self.state = "CHARGING"
+        self.observed_this_charge = False
 
     def stop_charging(self):
         success = False
         if self.state == "CHARGING":
-            success = random.random() < self.probability()
+            if self.observed_this_charge:
+                success = False
+                self.flash_color = (210,210,225)
+            else:
+                success = random.random() < self.probability()
+                self.flash_color = (53,99,57) if success else (200,60,70)
             self.flash_timer = 0.5
             if success:
                 self.flash_color = (53, 99, 57)
@@ -56,6 +65,8 @@ class Barrier:
             int(cold[1] + (hot[1] - cold[1]) * self.charge),
             int(cold[2] + (hot[2] - cold[2]) * self.charge)
         )
+        if self.observed_this_charge:
+            color = (190,190,205)
         if self.flash_timer > 0:
             color = self.flash_color
         pygame.draw.rect(surf, (color), rect, border_radius=6)
@@ -122,11 +133,14 @@ time_left = random.uniform(19.0, 43.0)
 score = 0
 game_over = False
 camera_x = 0.0
+streak = 0
+best_streak = 0
 
 def reset_game():
-    global time_left, score, game_over, player
+    global time_left, score, game_over, player, streak
     time_left = random.uniform(19.0, 43.0)
     score = 0
+    streak = 0
     game_over = False
     player.x = 120
     player.y = HEIGHT * 0.6
@@ -161,8 +175,12 @@ while running:
                 else:
                     player.x = active_barrier.x - active_barrier.width_px / 2 - player.radius - 5
                 score += 1
+                streak += 1 ##I ain't giving 26 days bonus steak just because it is my fav number
+                best_streak = max(best_streak, streak)
+                score += streak - 1
             else:
-                shake = 0.26 ##Is a better number than my birthday?
+                shake = 0.26 ##Is there better number than my birthday?
+                streak = 0
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_p: ##Instead of going with english restart starting with R, i went with hindi
                     if game_over:
                         reset_game()
@@ -170,11 +188,12 @@ while running:
     keys = pygame.key.get_pressed()
     player.update(dt, keys)
 
+    observing = keys[pygame.K_o]
     camera_x = player.x - WIDTH / 2
     camera_x = max(0, camera_x)
     camera_x = min(camera_x, WORLD_END - WIDTH)
     for b in barriers:
-        b.update(dt)
+        b.update(dt, observing)
 
     shake_x, shake_y = 0,0
     if shake > 0:
@@ -194,15 +213,22 @@ while running:
     if active_barrier:
         text = font.render(f"charge: {active_barrier.charge:.2f}", True, (220, 220, 230))
         screen.blit(text, (16,16))
-        ptext = font.render(f"P(tunnel): {active_barrier.probability()*100:.0f}%", True, (220, 220, 230))
+        if active_barrier.observed_this_charge:
+            ptext = font.render(f"P(tunnel): {active_barrier.probability()*100:.0f}% (OBSERVED - locked)", True, (255, 190, 205))
+        else:
+            ptext = font.render(f"P(tunnel): ??? Hold o to observe (locks this attempt)", True, (159,124,222))
         screen.blit(ptext, (16, 40))
 
-        timer_text = font.render(f"time: {time_left:.1f} score; {score}", True, (217, 219, 231))
-        screen.blit(timer_text, (WIDTH - 220, 16))
+    timer_text = font.render(f"time: {time_left:.1f} score: {score} streak: {streak} best: {best_streak}", True, (142, 255, 125))
+    screen.blit(timer_text, (WIDTH - 373, 16))
         
-        if game_over:    
-            over_text = font.render(f"Sorry, Time is always limited ! - final score: {score} (press P to restart)", True, (255, 0, 255)) #I had to replace yellow with hot magenta pink because of visibilty issue,i tried bright yell,green and then the current color
+    if game_over:    
+            over_text = font.render(f"Sorry, Time is always limited ! - final score: {score} (press P to restart)", True, (255, 0, 255)) ##I had to replace yellow with hot magenta pink because of visibilty issue,i tried bright yell,green and then the current color
             screen.blit(over_text, (WIDTH // 2 - 347, HEIGHT // 2))
+
+    if camera_x >= WORLD_END - WIDTH:
+            end_text = font.render("THIS IS THE END!", True, (255, 0, 0))
+            screen.blit(end_text, (WIDTH // 2 - 98, HEIGHT - 224)) ##I changed all colors from plain to vibrant colors
     pygame.display.flip()
 
 pygame.quit()
