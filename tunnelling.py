@@ -1,14 +1,40 @@
 import pygame
 import math
 import random
+import numpy as np
 
 pygame.init()
+pygame.mixer.init()
 
 WIDTH, HEIGHT = 999,448
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("DOREMON'S QUANTUM TUNNEL")
 clock = pygame.time.Clock()
 font = pygame.font.SysFont("consolas", 19)
+
+def make_tone(freq, duration, volume=0.3):
+    sample_rate = 44100
+    n_samples = int(sample_rate * duration)
+    t = np.linspace(0, duration, n_samples, False)
+    wave = np.sin(freq * t * 2 * np.pi)
+    audio = (wave * volume * 32767).astype(np.int16)
+    stereo = np.column_stack((audio, audio))
+    return pygame.sndarray.make_sound(stereo)
+
+def make_sweep(freq_start, freq_end, duration, volume=0.3):
+    sample_rate = 44100
+    n_samples = int(sample_rate * duration )
+    t = np.linspace(0, duration, n_samples, False)
+    freq = np.linspace(freq_start, freq_end, n_samples)
+    wave = np.sin(2 * np.pi * freq * t)
+    audio = (wave * volume * 32767).astype(np.int16)
+    stereo = np.column_stack((audio, audio))
+    return pygame.sndarray.make_sound(stereo)
+
+sound_charge_start = make_tone(220, 0.08)
+sound_success = make_sweep(220, 1100, 0.25)
+sound_fail = make_sweep(300, 80, 0.3)
+sound_observed = make_tone(330, 0.3, 0.2)
 
 class Barrier:
     def __init__(self, x, width_px):
@@ -135,6 +161,7 @@ game_over = False
 camera_x = 0.0
 streak = 0
 best_streak = 0
+game_started = False
 
 def reset_game():
     global time_left, score, game_over, player, streak
@@ -145,11 +172,10 @@ def reset_game():
     player.x = 120
     player.y = HEIGHT * 0.6
 
-
 while running:
     dt = clock.tick(60)/ 1000.0
 
-    if not game_over:
+    if game_started and not game_over:
         time_left -= dt
         if time_left <= 0:
             time_left = 0
@@ -165,28 +191,40 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
+        elif event.type == pygame.KEYDOWN and not game_started:
+            game_started = True
+            print("game started")
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
              if active_barrier and not game_over:
                  active_barrier.start_charging()
+                 sound_charge_start.play()
         elif event.type == pygame.KEYUP and event.key == pygame.K_SPACE:
-            if active_barrier and not game_over and active_barrier.stop_charging():
-                if player.x < active_barrier.x:
-                    player.x = active_barrier.x + active_barrier.width_px / 2 + player.radius + 5
+            if active_barrier and not game_over:
+                was_observed = active_barrier.observed_this_charge
+                if active_barrier.stop_charging():
+                    if player.x < active_barrier.x:
+                        player.x = active_barrier.x + active_barrier.width_px / 2 + player.radius + 5
+                    else:
+                        player.x = active_barrier.x - active_barrier.width_px / 2 - player.radius - 5
+                    score += 1
+                    streak += 1 ##I ain't giving 26 days bonus steak just because it is my fav number
+                    best_streak = max(best_streak, streak)
+                    score += streak - 1
+                    sound_success.play()
                 else:
-                    player.x = active_barrier.x - active_barrier.width_px / 2 - player.radius - 5
-                score += 1
-                streak += 1 ##I ain't giving 26 days bonus steak just because it is my fav number
-                best_streak = max(best_streak, streak)
-                score += streak - 1
-            else:
-                shake = 0.26 ##Is there better number than my birthday?
-                streak = 0
+                    shake = 0.26 ##Is there better number than my birthday?
+                    streak = 0
+                    if was_observed:
+                        sound_observed.play()
+                    else:
+                        sound_fail.play()
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_p: ##Instead of going with english restart starting with R, i went with hindi
                     if game_over:
                         reset_game()
                      
     keys = pygame.key.get_pressed()
-    player.update(dt, keys)
+    if game_started:
+        player.update(dt, keys)
 
     observing = keys[pygame.K_o]
     camera_x = player.x - WIDTH / 2
@@ -209,6 +247,18 @@ while running:
     player.x += shake_x
     player.draw(screen, camera_x)
     player.x -= shake_x
+
+    if not game_started:
+         title = font.render("DOREMON'S QUANTUM TUNNEL", True, (255,180, 60))
+         screen.blit(title, (WIDTH // 2 - 180, HEIGHT // 2 - 80))
+         c1 = font.render("Press left arrow to move left and right arrow to move right  SPACE hold to charge release to tunnel", True, (60, 180, 50))
+         screen.blit(c1, (WIDTH // 2 - 486, HEIGHT // 2 - 40))
+         c2 = font.render("Hold o while charging to OBSERVE - reveals odds but guarantees failure", True, (80, 45, 140))
+         screen.blit(c2, (WIDTH // 2 -270, HEIGHT // 2 - 16))
+         c3 = font.render("Press any key to begin", True, (220, 220, 230))
+         screen.blit(c3, (WIDTH // 2 - 100, HEIGHT // 2 + 30))
+         pygame.display.flip()
+         continue 
 
     if active_barrier:
         text = font.render(f"charge: {active_barrier.charge:.2f}", True, (220, 220, 230))
