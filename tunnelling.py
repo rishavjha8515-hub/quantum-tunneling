@@ -214,7 +214,6 @@ while running:
             running = False
         elif event.type == pygame.KEYDOWN and not game_started:
             game_started = True
-            print("game started")
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
              if active_barrier and not game_over:
                  active_barrier.start_charging()
