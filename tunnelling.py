@@ -35,7 +35,9 @@ sound_charge_start = make_tone(220, 0.08)
 sound_success = make_sweep(220, 1100, 0.25)
 sound_fail = make_sweep(300, 80, 0.3)
 sound_observed = make_tone(330, 0.3, 0.2)
+sound_decohere = make_sweep(700, 60, 0.45)
 
+DECOHERENCE_TIME = 1.2 ##I was thinking of something unique and ended up at my research again
 class Barrier:
     def __init__(self, x, width_px):
         self.x = x
@@ -48,19 +50,34 @@ class Barrier:
         self.charge_speed = 0.26 ## I am making it all about myself,but 26 is special because it is between a perfect square and perfect cube + my birthday
         self.barrier_height = random.uniform(0.5,2.0)
         self.observed_this_charge = False
+        self.hold_at_max = 0.0
 
     def update(self, dt, observing):
+        decohered_now = False
         if self.state == "CHARGING":
             self.charge = min(1.0, self.charge + dt * self.charge_speed)
             if observing:
                 self.observed_this_charge = True
+            if self.charge >= 1.0:
+                self.hold_at_max += dt
+                if self.hold_at_max >= DECOHERENCE_TIME:
+                    self.state = "IDLE"
+                    self.charge = 0.0
+                    self.hold_at_max = 0.0
+                    self.flash_color = (170, 60, 255)
+                    self.flash_timer = 0.6
+                    self.charge_speed = random.uniform(0.15, 2.25)
+                    self.barrier_height = random.uniform(0.5, 2.0)
+                    decohered_now = True
         if self.flash_timer > 0:
             self.flash_timer -= dt
         self.swirl_angle += dt * (7 + self.charge * 10)
+        return decohered_now
 
     def start_charging(self):
         self.state = "CHARGING"
         self.observed_this_charge = False
+        self.hold_at_max = 0.0
 
     def stop_charging(self):
         success = False
@@ -78,6 +95,7 @@ class Barrier:
                 self.flash_color = (200, 60, 70)
         self.state = "IDLE"
         self.charge = 0.0
+        self.hold_at_max = 0.0
         self.charge_speed = random.uniform(0.15,2.25)
         self.barrier_height = random.uniform(0.5,2.0)
         return success
@@ -91,6 +109,10 @@ class Barrier:
             int(cold[1] + (hot[1] - cold[1]) * self.charge),
             int(cold[2] + (hot[2] - cold[2]) * self.charge)
         )
+        if self.state == "CHARGING" and self.hold_at_max > 0:
+            t = min(1.0, self.hold_at_max / DECOHERENCE_TIME)
+            purple = (170, 60, 255)
+            color = tuple(int(color[i] + (purple[i] - color[i]) * t) for i in range(3))
         if self.observed_this_charge:
             color = (190,190,205)
         if self.flash_timer > 0:
@@ -128,7 +150,6 @@ class Player:
      self.speed = 225
      self.radius = 16
      self.stretch_timer = 0.0
-
 
     def update(self, dt, keys):
         if keys[pygame.K_LEFT]:
@@ -173,7 +194,7 @@ def reset_game():
     player.y = HEIGHT * 0.6
 
 while running:
-    dt = clock.tick(60)/ 1000.0
+    dt = clock.tick(53)/ 1000.0
 
     if game_started and not game_over:
         time_left -= dt
@@ -199,7 +220,7 @@ while running:
                  active_barrier.start_charging()
                  sound_charge_start.play()
         elif event.type == pygame.KEYUP and event.key == pygame.K_SPACE:
-            if active_barrier and not game_over:
+            if active_barrier and not game_over and active_barrier.state == "CHARGING":
                 was_observed = active_barrier.observed_this_charge
                 if active_barrier.stop_charging():
                     if player.x < active_barrier.x:
@@ -231,7 +252,10 @@ while running:
     camera_x = max(0, camera_x)
     camera_x = min(camera_x, WORLD_END - WIDTH)
     for b in barriers:
-        b.update(dt, observing)
+        if b.update(dt, observing):
+            streak = 0.0
+            shake = 0.4
+            sound_decohere.play()
 
     shake_x, shake_y = 0,0
     if shake > 0:
@@ -268,6 +292,10 @@ while running:
         else:
             ptext = font.render(f"P(tunnel): ??? Hold o to observe (locks this attempt)", True, (159,124,222))
         screen.blit(ptext, (16, 40))
+        if active_barrier.hold_at_max > 0:
+            left = DECOHERENCE_TIME - active_barrier.hold_at_max
+            warn = font.render(f"DECOHERING in {left:.1f}s - release!", True, (200, 90, 255))
+            screen.blit(warn, (16, 64))
 
     timer_text = font.render(f"time: {time_left:.1f} score: {score} streak: {streak} best: {best_streak}", True, (142, 255, 125))
     screen.blit(timer_text, (WIDTH - 373, 16))
