@@ -51,6 +51,11 @@ class Barrier:
         self.barrier_height = random.uniform(0.5,2.0)
         self.observed_this_charge = False
         self.hold_at_max = 0.0
+        self.partner = None
+        self.entangle_bonus = 0.0
+        self.forced = None
+        self.stored = 0.0
+        self.echo = 0.0
 
     def update(self, dt, observing):
         decohered_now = False
@@ -78,32 +83,36 @@ class Barrier:
         self.state = "CHARGING"
         self.observed_this_charge = False
         self.hold_at_max = 0.0
+        self.charge = self.stored
+        self.stored = 0.0
 
     def stop_charging(self):
         success = False
         if self.state == "CHARGING":
             if self.observed_this_charge:
-                success = False
                 self.flash_color = (210,210,225)
             else:
                 success = random.random() < self.probability()
                 self.flash_color = (53,99,57) if success else (200,60,70)
+                if self.partner:
+                    self.partner.stored = self.charge
+                    self.partner.flash_timer = 0.5
+                    self.partner.flash_color = (150, 100, 25)
+                self.forced = None
             self.flash_timer = 0.5
-            if success:
-                self.flash_color = (53, 99, 57)
-            else:
-                self.flash_color = (200, 60, 70)
         self.state = "IDLE"
         self.charge = 0.0
         self.hold_at_max = 0.0
         self.charge_speed = random.uniform(0.15,2.25)
         self.barrier_height = random.uniform(0.5,2.0)
+        self.forced = None
         return success
 
     def draw(self, surf, camera_x):
         rect = pygame.Rect(self.x - camera_x - self.width_px // 2, HEIGHT * 0.26, self.width_px, HEIGHT * 0.54)
         cold = (96, 200, 246)
         hot = (255, 99, 68)
+        level = max(self.charge, self.echo, self.stored)
         color = (
             int(cold[0] + (hot[0] - cold[0]) * self.charge),
             int(cold[1] + (hot[1] - cold[1]) * self.charge),
@@ -113,10 +122,21 @@ class Barrier:
             t = min(1.0, self.hold_at_max / DECOHERENCE_TIME)
             purple = (170, 60, 255)
             color = tuple(int(color[i] + (purple[i] - color[i]) * t) for i in range(3))
+        if self.forced is True:
+            color = (80, 230, 140)
+        elif self.forced is False:
+            color =(70, 70, 85)
         if self.observed_this_charge:
             color = (190,190,205)
         if self.flash_timer > 0:
             color = self.flash_color
+        if self.partner and self.x < self.partner.x:
+            link = (150, 100, 255)
+            if self.forced is True or self.partner.forced is True:
+                link = (80, 220, 120)
+            elif self.forced is False or self.partner.forced is False:
+                link = (255, 90, 90)
+            pygame.draw.line(surf, link, (self.x - camera_x, HEIGHT * 0.53), (self.partner.x - camera_x, HEIGHT * 0.53), 3)
         pygame.draw.rect(surf, (color), rect, border_radius=6)
 
         num_dots = 7
@@ -127,6 +147,8 @@ class Barrier:
             pygame.draw.circle(surf, (255, 255, 255), (int(orbit_x), int(orbit_y)), 4)
 
     def probability(self):
+        if self.forced is not None:
+            return 1.0 if self.forced else 0.0
         width_units = self.width_px /30
         energy = self.charge * 1.4
         deficit = max(0.001, self.barrier_height - energy)
@@ -141,6 +163,23 @@ for i in range(NUM_BARRIERS):
     barriers.append(Barrier(x=x, width_px=width))
 ## No need to experiment with width,as randomized barriers will generate barriers of different width giving different baseline proabability.
 
+def pair_barriers():
+    for b in barriers: 
+        b.partner = None
+        b.forced = None
+        b.stored = 0.0
+        b.echo = 0.0
+        b.state = "IDLE"
+        b.charge = 0.0
+        b.hold_at_max = 0.0
+        b.observed_this_charge = False
+    order = barriers[:]
+    random.shuffle(order)
+    for k in range(0, len(order) -1, 2):
+        order[k].partner = order[k + 1]
+        order[k+1].partner = order[k]
+
+pair_barriers() ##I wrote earlier,connecting like barrier[0] with barrier[1] but then I rewrote it to add fun
 WORLD_END = barriers[-1].x + 325
 
 class Player:
@@ -152,10 +191,17 @@ class Player:
      self.stretch_timer = 0.0
 
     def update(self, dt, keys):
+        old_x = self.x
         if keys[pygame.K_LEFT]:
              self.x -= self.speed * dt
         if keys[pygame.K_RIGHT]:
              self.x += self.speed * dt
+        for b in barriers:
+            half = b.width_px / 2 + self.radius
+            if old_x <= b.x:
+                self.x = min(self.x, b.x - half)
+            else:
+                self.x = max(self.x, b.x + half)
         self.x = max(20, min(WORLD_END, self.x))
         if self.stretch_timer > 0:
             self.stretch_timer -= dt
@@ -205,7 +251,7 @@ while running:
     active_barrier = None
     near_barrier = False
     for b in barriers:
-        if abs(player.x - b.x) < 96: ## it is based on how close you need to stand to interactions,it doesn't affects tunnel proability ,only whether you can charge yet.
+        if abs(player.x - b.x) < b.width_px / 2 + player.radius + 30: ## it is based on how close you need to stand to interactions,it doesn't affects tunnel proability ,only whether you can charge yet.
             active_barrier = b
             break
 
@@ -241,6 +287,7 @@ while running:
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_p: ##Instead of going with english restart starting with R, i went with hindi
                     if game_over:
                         reset_game()
+                        pair_barriers()
                      
     keys = pygame.key.get_pressed()
     if game_started:
@@ -250,6 +297,11 @@ while running:
     camera_x = player.x - WIDTH / 2
     camera_x = max(0, camera_x)
     camera_x = min(camera_x, WORLD_END - WIDTH)
+    for b in barriers:
+        b.echo = 0.0
+    for b in barriers:
+        if b.state == "CHARGING" and b.partner:
+            b.partner.echo = b.charge
     for b in barriers:
         if b.update(dt, observing):
             streak = 0.0
@@ -295,6 +347,9 @@ while running:
             left = DECOHERENCE_TIME - active_barrier.hold_at_max
             warn = font.render(f"DECOHERING in {left:.1f}s - release!", True, (200, 90, 255))
             screen.blit(warn, (16, 64))
+        if active_barrier.stored > 0:
+            msg = f"ENTANGLED: inherited {active_barrier.stored:.2f} charge"
+            screen.blit(font.render(msg, True, (120, 255, 200)), (16,88))
 
     timer_text = font.render(f"time: {time_left:.1f} score: {score} streak: {streak} best: {best_streak}", True, (142, 255, 125))
     screen.blit(timer_text, (WIDTH - 373, 16))
