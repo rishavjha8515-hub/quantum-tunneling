@@ -56,6 +56,7 @@ class Barrier:
         self.forced = None
         self.stored = 0.0
         self.echo = 0.0
+        self.link_type = "same"
 
     def update(self, dt, observing):
         decohered_now = False
@@ -95,9 +96,9 @@ class Barrier:
                 success = random.random() < self.probability()
                 self.flash_color = (53,99,57) if success else (200,60,70)
                 if self.partner:
-                    self.partner.stored = self.charge
+                    self.partner.stored = self.charge if self.link_type == "same" else 1.0 - self.charge
                     self.partner.flash_timer = 0.5
-                    self.partner.flash_color = (150, 100, 25)
+                    self.partner.flash_color = (150, 100, 255) if self.link_type == "same" else (255, 100, 150) 
                 self.forced = None
             self.flash_timer = 0.5
         self.state = "IDLE"
@@ -131,7 +132,7 @@ class Barrier:
         if self.flash_timer > 0:
             color = self.flash_color
         if self.partner and self.x < self.partner.x:
-            link = (150, 100, 255)
+            link = (150, 100, 255) if self.link_type == "same" else (255, 170, 60)
             if self.forced is True or self.partner.forced is True:
                 link = (80, 220, 120)
             elif self.forced is False or self.partner.forced is False:
@@ -178,6 +179,10 @@ def pair_barriers():
     for k in range(0, len(order) -1, 2):
         order[k].partner = order[k + 1]
         order[k+1].partner = order[k]
+        kind = random.choice(["same", "inverse"])
+        order[k].link_type = kind
+        order[k + 1].link_type = kind
+
 
 pair_barriers() ##I wrote earlier,connecting like barrier[0] with barrier[1] but then I rewrote it to add fun
 WORLD_END = barriers[-1].x + 325
@@ -301,7 +306,7 @@ while running:
         b.echo = 0.0
     for b in barriers:
         if b.state == "CHARGING" and b.partner:
-            b.partner.echo = b.charge
+            b.partner.echo = b.charge if b.link_type == "same" else 1.0 - b.charge
     for b in barriers:
         if b.update(dt, observing):
             streak = 0.0
@@ -350,6 +355,10 @@ while running:
         if active_barrier.stored > 0:
             msg = f"ENTANGLED: inherited {active_barrier.stored:.2f} charge"
             screen.blit(font.render(msg, True, (120, 255, 200)), (16,88))
+        if active_barrier.partner:
+            kind = "mirror" if active_barrier.link_type == "same" else "inverse"
+            col = (150, 100, 255) if kind == "mirror" else (255, 170, 60)
+            screen.blit(font.render(f"linked: {kind}", True, col), (16, 112))
 
     timer_text = font.render(f"time: {time_left:.1f} score: {score} streak: {streak} best: {best_streak}", True, (142, 255, 125))
     screen.blit(timer_text, (WIDTH - 373, 16))
