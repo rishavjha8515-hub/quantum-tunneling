@@ -2,6 +2,14 @@ import pygame
 import math
 import random
 import numpy as np
+import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 pygame.init()
 pygame.mixer.init()
@@ -38,6 +46,7 @@ sound_observed = make_tone(330, 0.3, 0.2)
 sound_decohere = make_sweep(700, 60, 0.45)
 
 DECOHERENCE_TIME = 1.2 ##I was thinking of something unique and ended up at my research again
+FALLBACK_TRIVIA = {"q": "A thicker barrier makes tunnelling....", "options": ["easier", "harder", "unchanged"], "answer": 0}
 class Barrier:
     def __init__(self, x, width_px):
         self.x = x
@@ -57,6 +66,7 @@ class Barrier:
         self.stored = 0.0
         self.echo = 0.0
         self.link_type = "same"
+        self.trivia_energy = 0.0
 
     def update(self, dt, observing):
         decohered_now = False
@@ -107,6 +117,7 @@ class Barrier:
         self.charge_speed = random.uniform(0.15,2.25)
         self.barrier_height = random.uniform(0.5,2.0)
         self.forced = None
+        self.trivia_energy = 0.0
         return success
 
     def draw(self, surf, camera_x):
@@ -115,9 +126,9 @@ class Barrier:
         hot = (255, 99, 68)
         level = max(self.charge, self.echo, self.stored)
         color = (
-            int(cold[0] + (hot[0] - cold[0]) * self.charge),
-            int(cold[1] + (hot[1] - cold[1]) * self.charge),
-            int(cold[2] + (hot[2] - cold[2]) * self.charge)
+            int(cold[0] + (hot[0] - cold[0]) * level ),
+            int(cold[1] + (hot[1] - cold[1]) * level ),
+            int(cold[2] + (hot[2] - cold[2]) * level )
         )
         if self.state == "CHARGING" and self.hold_at_max > 0:
             t = min(1.0, self.hold_at_max / DECOHERENCE_TIME)
@@ -151,7 +162,7 @@ class Barrier:
         if self.forced is not None:
             return 1.0 if self.forced else 0.0
         width_units = self.width_px /30
-        energy = self.charge * 1.4
+        energy = self.charge * 1.4 + self.trivia_energy
         deficit = max(0.001, self.barrier_height - energy)
         T = math.exp(-2 * width_units * math.sqrt(deficit))
         return max(0.02, min(0.98, T))
@@ -174,6 +185,7 @@ def pair_barriers():
         b.charge = 0.0
         b.hold_at_max = 0.0
         b.observed_this_charge = False
+        b.trivia_energy = 0.0
     order = barriers[:]
     random.shuffle(order)
     for k in range(0, len(order) -1, 2):
@@ -221,12 +233,56 @@ class Player:
         top = self.y - h / 2
         pygame.draw.ellipse(surf, (230, 230, 240), (left, top, w, h))
 
-player = Player(x=120, y=HEIGHT * 0.6)
+class QuantumGhost:
+    def __init__(self):
+        self.active = False
+        self.x = 0.0
+        self.timer = 0.0
+        self.spawn_timer = random.uniform(10.0, 18.0)
+        self.touched = set()
+        self.phase = 0.0
 
+    def update(self, dt, player):
+        self.phase += dt * 5
+        if not self.active:
+            self.spawn_timer -= dt
+            if self.spawn_timer <= 0:
+                self.active = True
+                side = random.choice([-1, 1])
+                self.x = max(20, min(WORLD_END, player.x + side * 350))
+                self.timer = 5.0
+                self.touched.clear()
+            return
+
+        self.timer -= dt
+        self.x += (player.x - self.x) * min(1.0, dt * 1.5)
+        for b in barriers:
+            if b.partner and b not in self.touched:
+                if abs(self.x - b.x) < b.width_px/ 2 + 41:
+                    b.partner.stored = min(1.0, b.partner.stored + 0.25)
+                    b.partner.flash_timer = 0.5
+                    b.partner.flash_color = (100, 210, 255)
+                    self.touched.add(b)
+                    self.touched.add(b.partner)
+        if self.timer <= 0:
+            self.active = False
+            self.spawn_timer = random.uniform(10.0, 18.0)
+
+    def draw(self, surf, camera_x, player_y):
+        if not self.active:
+            return
+        gx = int(self.x - camera_x)
+        gy = int(player_y + math.sin(self.phase) * 12)
+        pygame.draw.circle(surf, (102, 222, 255), (gx, gy), 23, 2)
+        pygame.draw.circle(surf, (162, 100, 255), (gx, gy), 15, 2)
+        pygame.draw.circle(surf, (222, 100, 255), (gx, gy), 5)
+player = Player(x=120, y=HEIGHT * 0.6)
+ghost = QuantumGhost()
+ 
 running = True
 was_near = False
 near_barrier = False
-shake = 0.0
+shake = 0.0 
 time_left = random.uniform(19.0, 43.0)
 score = 0
 game_over = False
@@ -234,15 +290,24 @@ camera_x = 0.0
 streak = 0
 best_streak = 0
 game_started = False
+title_timer = 0.0
+CHECK_TIME = 1.8
+trivia = FALLBACK_TRIVIA
+trivia_barrier = random.choice(barriers)
+trivia_state = "waiting" if GROQ_API_KEY else "off"
 
 def reset_game():
-    global time_left, score, game_over, player, streak
+    global time_left, score, game_over, player, streak, trivia_state, trivia_barrier
     time_left = random.uniform(19.0, 43.0)
     score = 0
     streak = 0
     game_over = False
     player.x = 120
-    player.y = HEIGHT * 0.6
+    player.y = HEIGHT * 0.6 
+    trivia_state = "waiting" if GROQ_API_KEY else "off"
+    trivia_barrier = random.choice(barriers)
+    ghost.active = False
+    ghost.spawn_timer = random.uniform(10.0, 18.0)
 
 while running:
     dt = clock.tick(53)/ 1000.0
@@ -263,12 +328,18 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-        elif event.type == pygame.KEYDOWN and not game_started:
+        elif event.type == pygame.KEYDOWN and not game_started and title_timer >= CHECK_TIME:
             game_started = True
+        elif event.type == pygame.KEYDOWN and event.key in (pygame.K_1, pygame.K_2, pygame.K_3) and trivia_state == "asking":
+            correct = (event.key - pygame.K_1) == trivia[ "answer" ]
+            trivia_barrier.trivia_energy = 0.4 if correct else -0.4
+            trivia_state = "done"
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
              if active_barrier and not game_over:
                  active_barrier.start_charging()
                  sound_charge_start.play()
+                 if active_barrier is trivia_barrier and trivia_state == "waiting":
+                    trivia_state = "asking"
         elif event.type == pygame.KEYUP and event.key == pygame.K_SPACE:
             if active_barrier and not game_over and active_barrier.state == "CHARGING":
                 was_observed = active_barrier.observed_this_charge
@@ -297,6 +368,8 @@ while running:
     keys = pygame.key.get_pressed()
     if game_started:
         player.update(dt, keys)
+        if not game_over:
+            ghost.update(dt, player)
 
     observing = keys[pygame.K_o]
     camera_x = player.x - WIDTH / 2
@@ -309,7 +382,7 @@ while running:
             b.partner.echo = b.charge if b.link_type == "same" else 1.0 - b.charge
     for b in barriers:
         if b.update(dt, observing):
-            streak = 0.0
+            streak = 0
             shake = 0.4
             sound_decohere.play()
 
@@ -327,14 +400,26 @@ while running:
     player.x += shake_x
     player.draw(screen, camera_x)
     player.x -= shake_x
+    ghost.draw(screen, camera_x, player.y)
 
     if not game_started:
+         title_timer += dt
          title = font.render("DOREMON'S QUANTUM TUNNEL", True, (255,180, 60))
          screen.blit(title, (WIDTH // 2 - 180, HEIGHT // 2 - 80))
          c1 = font.render("Press left arrow to move left and right arrow to move right  SPACE hold to charge release to tunnel", True, (60, 180, 50))
          screen.blit(c1, (WIDTH // 2 - 486, HEIGHT // 2 - 40))
          c2 = font.render("Hold o while charging to OBSERVE - reveals odds but guarantees failure", True, (80, 45, 140))
          screen.blit(c2, (WIDTH // 2 -270, HEIGHT // 2 - 16))
+         if title_timer < CHECK_TIME:
+            dots = "." * (int(title_timer * 4) % 4)
+            c4 = font.render("Checking for trivia key" + dots, True, (78, 92, 190))
+            screen.blit(c4, (WIDTH // 2 - 130, HEIGHT // 2 + 10))
+         else:
+            if GROQ_API_KEY:
+                c4 = font.render("KEY FOUND! - you will get one trivia question to impact your score", True, (120, 255, 90))
+            else:
+                c4 = font.render("NO KEY FOUND - no problem,you can continue without trivia", True, (90, 255, 120))
+            screen.blit(c4, (WIDTH // 2 - c4.get_width() // 2, HEIGHT // 2 ))
          c3 = font.render("Press any key to begin", True, (220, 220, 230))
          screen.blit(c3, (WIDTH // 2 - 100, HEIGHT // 2 + 30))
          pygame.display.flip()
@@ -359,6 +444,13 @@ while running:
             kind = "mirror" if active_barrier.link_type == "same" else "inverse"
             col = (150, 100, 255) if kind == "mirror" else (255, 170, 60)
             screen.blit(font.render(f"linked: {kind}", True, col), (16, 112))
+        if active_barrier.trivia_energy != 0:
+            msg = "TRIVIA: correct, boosted!" if active_barrier.trivia_energy > 0 else "TRIVIA: wrong, weakened!"
+            screen.blit(font.render(msg, True, (255, 221, 123)), (16,136))
+    if trivia_state == "asking":
+        screen.blit(font.render(trivia["q"], True, (255, 220, 120)), (16, 170))
+        for i, opt in enumerate(trivia["options"]):
+            screen.blit(font.render(f"{i + 1}: {opt}", True, (255, 220, 120)), (16, 194 + i * 22))
 
     timer_text = font.render(f"time: {time_left:.1f} score: {score} streak: {streak} best: {best_streak}", True, (142, 255, 125))
     screen.blit(timer_text, (WIDTH - 373, 16))
@@ -369,7 +461,7 @@ while running:
 
     if camera_x >= WORLD_END - WIDTH:
             end_text = font.render("THIS IS THE END!", True, (255, 0, 0))
-            screen.blit(end_text, (WIDTH // 2 - 98, HEIGHT - 224)) ##I changed all colors from plain to vibrant colors
+            screen.blit(end_text, (WIDTH // 2 - 98, HEIGHT - 195)) ##I changed all colors from plain to vibrant colors
     pygame.display.flip()
 
 pygame.quit()
