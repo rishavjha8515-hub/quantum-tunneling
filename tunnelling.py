@@ -322,6 +322,7 @@ running = True
 was_near = False
 near_barrier = False
 shake = 0.0 
+freeze = 0.0
 time_left = random.uniform(19.0, 43.0)
 score = 0
 game_over = False
@@ -406,11 +407,12 @@ while running:
                     score += streak - 1
                     sound_success.play()
                 else:
-                    shake = 0.26 ##Is there better number than my birthday?
                     streak = 0
                     if was_observed:
+                        freeze = 0.25
                         sound_observed.play()
                     else:
+                        shake = 0.26
                         sound_fail.play()
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_p: ##Instead of going with english restart starting with R, i went with hindi
                     if game_over:
@@ -453,6 +455,13 @@ while running:
     player.draw(screen, camera_x)
     player.x -= shake_x
     ghost.draw(screen, camera_x, player.y)
+
+    if freeze > 0:
+        freeze -= dt
+        overlay = pygame.Surface((WIDTH, HEIGHT))
+        overlay.fill((190, 215, 225))
+        overlay.set_alpha(int(110 * min(1.0, freeze / 0.35)))
+        screen.blit(overlay, (0, 0))
 
     if not game_started:
          title_timer += dt
