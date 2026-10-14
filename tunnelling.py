@@ -8,8 +8,10 @@ try:
     load_dotenv()
 except ImportError:
     pass
-
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+import json
+import threading
+import urllib.request
 
 pygame.init()
 pygame.mixer.init()
@@ -47,6 +49,43 @@ sound_decohere = make_sweep(700, 60, 0.45)
 
 DECOHERENCE_TIME = 1.2 ##I was thinking of something unique and ended up at my research again
 FALLBACK_TRIVIA = {"q": "A thicker barrier makes tunnelling....", "options": ["easier", "harder", "unchanged"], "answer": 0}
+TRIVIA_MODEL = "openai/gpt-oss-120b"
+trivia_fetch = {"status": "idle", "data": None}
+
+def fetch_trivia():
+    trivia_fetch["status"] = "loading"
+    prompt = ("Write ONE multiple-choice question about quantum tunneling or basic quantum mechanics"
+              "for a high school student. Reply with JSON only, like:"
+              '{"q": "...", "options": ["...", "...", "..."], "answer": 0}'
+              "options has exactly 3 items,  answer is the index(0-2) of the correct one. "
+              "q under 70 characters, each option under 25 characters.")
+    body = json.dumps({
+        "model": TRIVIA_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "reasoning_effort": "low",
+        "temperature": 0.7,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.groq.com/openai/v1/chat/completions",
+        data=body,
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer  {GROQ_API_KEY}",
+                 "User-Agent": "qunatum-tunnel/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            text = json.loads(r.read())["choices"][0]["message"]["content"]
+        data = json.loads(text[text.index("{"): text.rindex("}") + 1])
+        if not (isinstance(data["q"], str) and len(data["options"]) == 3
+                and all(isinstance(o, str) for o in data["options"])
+                and data["answer"] in (0, 1, 2)):
+            raise ValueError("bad question format")
+        trivia_fetch["data"] = data
+        trivia_fetch["status"] = "ok"
+    except Exception as e:
+        print("trivia fetch failed:", e)
+        trivia_fetch["status"] = "failed"
+
 class Barrier:
     def __init__(self, x, width_px):
         self.x = x
@@ -295,6 +334,13 @@ CHECK_TIME = 1.8
 trivia = FALLBACK_TRIVIA
 trivia_barrier = random.choice(barriers)
 trivia_state = "waiting" if GROQ_API_KEY else "off"
+if GROQ_API_KEY:
+    threading.Thread(target=fetch_trivia, daemon=True).start()
+
+def title_checking():
+    if not GROQ_API_KEY:
+        return title_timer < CHECK_TIME
+    return trivia_fetch["status"] in ("idle", "loading") or title_timer < CHECK_TIME
 
 def reset_game():
     global time_left, score, game_over, player, streak, trivia_state, trivia_barrier
@@ -308,9 +354,15 @@ def reset_game():
     trivia_barrier = random.choice(barriers)
     ghost.active = False
     ghost.spawn_timer = random.uniform(10.0, 18.0)
+    if GROQ_API_KEY:
+        trivia_fetch["status"] = "loading"
+        threading.Thread(target=fetch_trivia, daemon=True).start()
 
 while running:
     dt = clock.tick(53)/ 1000.0
+
+    if trivia_state != "asking" and trivia_fetch["status"] == "ok":
+        trivia = trivia_fetch["data"]
 
     if game_started and not game_over:
         time_left -= dt
@@ -328,7 +380,7 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-        elif event.type == pygame.KEYDOWN and not game_started and title_timer >= CHECK_TIME:
+        elif event.type == pygame.KEYDOWN and not game_started and not title_checking():
             game_started = True
         elif event.type == pygame.KEYDOWN and event.key in (pygame.K_1, pygame.K_2, pygame.K_3) and trivia_state == "asking":
             correct = (event.key - pygame.K_1) == trivia[ "answer" ]
@@ -410,18 +462,22 @@ while running:
          screen.blit(c1, (WIDTH // 2 - 486, HEIGHT // 2 - 40))
          c2 = font.render("Hold o while charging to OBSERVE - reveals odds but guarantees failure", True, (80, 45, 140))
          screen.blit(c2, (WIDTH // 2 -270, HEIGHT // 2 - 16))
-         if title_timer < CHECK_TIME:
+         if title_checking():
             dots = "." * (int(title_timer * 4) % 4)
-            c4 = font.render("Checking for trivia key" + dots, True, (78, 92, 190))
+            label = "Asking Groq for your question" if GROQ_API_KEY else "Checking for trivia key"
+            c4 = font.render(label + dots, True, (78, 92, 190))
             screen.blit(c4, (WIDTH // 2 - 130, HEIGHT // 2 + 10))
          else:
-            if GROQ_API_KEY:
-                c4 = font.render("KEY FOUND! - you will get one trivia question to impact your score", True, (120, 255, 90))
+            if not GROQ_API_KEY:
+                msg4, col4 = "NO KEY FOUND - no problem , continue without any trivia", (90, 255, 120)
+            elif trivia_fetch["status"] == "ok":
+                msg4, col4 = "QUESTION READY - one trivia question this run", (120, 255, 90)
             else:
-                c4 = font.render("NO KEY FOUND - no problem,you can continue without trivia", True, (90, 255, 120))
-            screen.blit(c4, (WIDTH // 2 - c4.get_width() // 2, HEIGHT // 2 ))
-         c3 = font.render("Press any key to begin", True, (220, 220, 230))
-         screen.blit(c3, (WIDTH // 2 - 100, HEIGHT // 2 + 30))
+                msg4, col4 = "Couldn't reach Groq - using the built-in question", (255, 170, 90)
+            c4 = font.render(msg4, True, col4)
+            screen.blit(c4, (WIDTH // 2 - c4.get_width() // 2, HEIGHT //2))
+            c3 = font.render("Press any key to begin", True, (220, 220, 230))
+            screen.blit(c3, (WIDTH // 2 - 100, HEIGHT // 2 + 30))
          pygame.display.flip()
          continue 
 
