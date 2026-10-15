@@ -48,6 +48,11 @@ sound_observed = make_tone(330, 0.3, 0.2)
 sound_decohere = make_sweep(700, 60, 0.45)
 
 DECOHERENCE_TIME = 1.2 ##I was thinking of something unique and ended up at my research again
+CHARGE_SPEED_RANGE = (0.3, 1.6)
+BARRIER_HEIGHT_RANGE = (0.5, 1.5)
+RUN_TIME_RANGE = (25.0, 45.0)
+TRIVIA_BONUS = 0.3
+GHOST_CHARGE = 0.25
 FALLBACK_TRIVIA = {"q": "A thicker barrier makes tunnelling....", "options": ["easier", "harder", "unchanged"], "answer": 0}
 TRIVIA_MODEL = "openai/gpt-oss-120b"
 trivia_fetch = {"status": "idle", "data": None}
@@ -96,7 +101,7 @@ class Barrier:
         self.flash_color = (255,255,255)
         self.swirl_angle = 0.0
         self.charge_speed = 0.26 ## I am making it all about myself,but 26 is special because it is between a perfect square and perfect cube + my birthday
-        self.barrier_height = random.uniform(0.5,2.0)
+        self.barrier_height = random.uniform(*BARRIER_HEIGHT_RANGE)
         self.observed_this_charge = False
         self.hold_at_max = 0.0
         self.partner = None
@@ -121,8 +126,8 @@ class Barrier:
                     self.hold_at_max = 0.0
                     self.flash_color = (170, 60, 255)
                     self.flash_timer = 0.6
-                    self.charge_speed = random.uniform(0.15, 2.25)
-                    self.barrier_height = random.uniform(0.5, 2.0)
+                    self.charge_speed = random.uniform(*CHARGE_SPEED_RANGE)
+                    self.barrier_height = random.uniform(*BARRIER_HEIGHT_RANGE)
                     decohered_now = True
         if self.flash_timer > 0:
             self.flash_timer -= dt
@@ -153,8 +158,8 @@ class Barrier:
         self.state = "IDLE"
         self.charge = 0.0
         self.hold_at_max = 0.0
-        self.charge_speed = random.uniform(0.15,2.25)
-        self.barrier_height = random.uniform(0.5,2.0)
+        self.charge_speed = random.uniform(*CHARGE_SPEED_RANGE)
+        self.barrier_height = random.uniform(*BARRIER_HEIGHT_RANGE)
         self.forced = None
         self.trivia_energy = 0.0
         return success
@@ -298,7 +303,7 @@ class QuantumGhost:
         for b in barriers:
             if b.partner and b not in self.touched:
                 if abs(self.x - b.x) < b.width_px/ 2 + 41:
-                    b.partner.stored = min(1.0, b.partner.stored + 0.25)
+                    b.partner.stored = min(1.0, b.partner.stored + GHOST_CHARGE)
                     b.partner.flash_timer = 0.5
                     b.partner.flash_color = (100, 210, 255)
                     self.touched.add(b)
@@ -323,7 +328,7 @@ was_near = False
 near_barrier = False
 shake = 0.0 
 freeze = 0.0
-time_left = random.uniform(19.0, 43.0)
+time_left = random.uniform(*RUN_TIME_RANGE)
 score = 0
 game_over = False
 camera_x = 0.0
@@ -345,7 +350,7 @@ def title_checking():
 
 def reset_game():
     global time_left, score, game_over, player, streak, trivia_state, trivia_barrier
-    time_left = random.uniform(19.0, 43.0)
+    time_left = random.uniform(*RUN_TIME_RANGE)
     score = 0
     streak = 0
     game_over = False
@@ -385,7 +390,7 @@ while running:
             game_started = True
         elif event.type == pygame.KEYDOWN and event.key in (pygame.K_1, pygame.K_2, pygame.K_3) and trivia_state == "asking":
             correct = (event.key - pygame.K_1) == trivia[ "answer" ]
-            trivia_barrier.trivia_energy = 0.4 if correct else -0.4
+            trivia_barrier.trivia_energy = TRIVIA_BONUS if correct else TRIVIA_BONUS
             trivia_state = "done"
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
              if active_barrier and not game_over:
