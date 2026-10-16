@@ -13,6 +13,22 @@ import json
 import threading
 import urllib.request
 
+HIGHSCORE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "highscore.txt")
+
+def load_highscore():
+    try:
+        with open(HIGHSCORE_FILE) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return 0
+
+def save_highscore(value):
+    try:
+        with open(HIGHSCORE_FILE, "w") as f:
+            f.write(str(value))
+    except OSError:
+        pass
+
 pygame.init()
 pygame.mixer.init()
 
@@ -46,6 +62,9 @@ sound_success = make_sweep(220, 1100, 0.25)
 sound_fail = make_sweep(300, 80, 0.3)
 sound_observed = make_tone(330, 0.3, 0.2)
 sound_decohere = make_sweep(700, 60, 0.45)
+sound_ghost = make_sweep(900, 300, 0.4, 0.15)
+sound_trivia_right = make_sweep(500, 900, 0.2)
+sound_entangle = make_sweep(400, 700, 0.15, 0.2)
 
 DECOHERENCE_TIME = 1.2 ##I was thinking of something unique and ended up at my research again
 CHARGE_SPEED_RANGE = (0.3, 1.6)
@@ -153,6 +172,7 @@ class Barrier:
                     self.partner.stored = self.charge if self.link_type == "same" else 1.0 - self.charge
                     self.partner.flash_timer = 0.5
                     self.partner.flash_color = (150, 100, 255) if self.link_type == "same" else (255, 100, 150) 
+                    sound_entangle.play()
                 self.forced = None
             self.flash_timer = 0.5
         self.state = "IDLE"
@@ -296,6 +316,7 @@ class QuantumGhost:
                 self.x = max(20, min(WORLD_END, player.x + side * 350))
                 self.timer = 5.0
                 self.touched.clear()
+                sound_ghost.play()
             return
 
         self.timer -= dt
@@ -306,6 +327,7 @@ class QuantumGhost:
                     b.partner.stored = min(1.0, b.partner.stored + GHOST_CHARGE)
                     b.partner.flash_timer = 0.5
                     b.partner.flash_color = (100, 210, 255)
+                    sound_entangle.play()
                     self.touched.add(b)
                     self.touched.add(b.partner)
         if self.timer <= 0:
@@ -334,6 +356,8 @@ game_over = False
 camera_x = 0.0
 streak = 0
 best_streak = 0
+high_score = load_highscore()
+new_record = False
 game_started = False
 title_timer = 0.0
 CHECK_TIME = 1.8
@@ -363,6 +387,7 @@ def reset_game():
     if GROQ_API_KEY:
         trivia_fetch["status"] = "loading"
         threading.Thread(target=fetch_trivia, daemon=True).start()
+    new_record = False
 
 while running:
     dt = clock.tick(53)/ 1000.0
@@ -375,6 +400,10 @@ while running:
         if time_left <= 0:
             time_left = 0
             game_over = True
+        if score > high_score:
+            high_score = score
+            new_record = True
+            save_highscore(high_score)
 
     active_barrier = None
     near_barrier = False
@@ -391,6 +420,7 @@ while running:
         elif event.type == pygame.KEYDOWN and event.key in (pygame.K_1, pygame.K_2, pygame.K_3) and trivia_state == "asking":
             correct = (event.key - pygame.K_1) == trivia[ "answer" ]
             trivia_barrier.trivia_energy = TRIVIA_BONUS if correct else TRIVIA_BONUS
+            (sound_trivia_right if correct else sound_trivia_wrong).play()
             trivia_state = "done"
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
              if active_barrier and not game_over:
@@ -492,6 +522,9 @@ while running:
             screen.blit(c4, (WIDTH // 2 - c4.get_width() // 2, HEIGHT //2))
             c3 = font.render("Press any key to begin", True, (220, 220, 230))
             screen.blit(c3, (WIDTH // 2 - 100, HEIGHT // 2 + 30))
+         if high_score > 0:
+             hs = font.render(f"High score: {high_score}", True, (255, 230, 90))
+             screen.blit(hs, (WIDTH // 2 - hs.get_width() // 2, HEIGHT // 2 + 70))   
          pygame.display.flip()
          continue 
 
@@ -523,10 +556,15 @@ while running:
             screen.blit(font.render(f"{i + 1}: {opt}", True, (255, 220, 120)), (16, 194 + i * 22))
 
     timer_text = font.render(f"time: {time_left:.1f} score: {score} streak: {streak} best: {best_streak}", True, (142, 255, 125))
+    hs_text = font.render(f"high score: {high_score}", True, (255, 230, 90))
+    screen.blit(hs_text, (WIDTH - 373, 40))
     screen.blit(timer_text, (WIDTH - 373, 16))
         
     if game_over:    
             over_text = font.render(f"Sorry, Time is always limited ! - final score: {score} (press P to restart)", True, (255, 0, 255)) ##I had to replace yellow with hot magenta pink because of visibilty issue,i tried bright yell,green and then the current color
+            if new_record:
+                rec = font.render("NEW HIGH SCORE!", True, (255, 230, 123))
+                screen.blit(rec, (WIDTH // 2 - rec.get_width() // 2, HEIGHT // 2 + 30))
             screen.blit(over_text, (WIDTH // 2 - 347, HEIGHT // 2))
 
     if camera_x >= WORLD_END - WIDTH:
