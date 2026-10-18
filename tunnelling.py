@@ -12,8 +12,11 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 import json
 import threading
 import urllib.request
+import sys
 
-HIGHSCORE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "highscore.txt")
+
+BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+HIGHSCORE_FILE = os.path.join(BASE_DIR, "highscore.txt")
 
 def load_highscore():
     try:
@@ -342,8 +345,41 @@ class QuantumGhost:
         pygame.draw.circle(surf, (102, 222, 255), (gx, gy), 23, 2)
         pygame.draw.circle(surf, (162, 100, 255), (gx, gy), 15, 2)
         pygame.draw.circle(surf, (222, 100, 255), (gx, gy), 5)
+
+class SchrodingerBox:
+    def __init__(self, x):
+        self.x = x
+        self.opened = False
+        self.phase = random.uniform(0, 6.28)
+
+    def update(self, dt):
+        self.phase += dt * 6
+
+    def draw(self, surf, camera_x, y):
+        cx = int(self.x - camera_x)
+        if self.opened:
+            pygame.draw.rect(surf, (72, 74, 86), (cx - 14, int(y) - 14, 28, 28), 2, border_radius=4)
+            return
+        wobble = int(math.sin(self.phase) * 3)
+        pygame.draw.rect(surf, (254, 212, 93), (cx - 14, int(y) - 14 + wobble, 28, 28), 3, border_radius=4)
+        q = font.render("?", True, (251, 207, 87))
+        surf.blit(q, (cx - q.get_width() // 2, int(y) - 11 + wobble))
+
 player = Player(x=120, y=HEIGHT * 0.6)
 ghost = QuantumGhost()
+
+boxes = []
+box_msg = ""
+box_msg_timer = 0.0
+
+def make_boxes():
+    boxes.clear()
+    xs = [280] + [(barriers[i].x + barriers[i +  1].x) / 2 for i in range(len(barriers) - 1)]
+    for x in xs:
+        if random.random() < 0.6:
+            boxes.append(SchrodingerBox(x))
+
+make_boxes()
  
 running = True
 was_near = False
@@ -387,7 +423,6 @@ def reset_game():
     if GROQ_API_KEY:
         trivia_fetch["status"] = "loading"
         threading.Thread(target=fetch_trivia, daemon=True).start()
-    new_record = False
 
 while running:
     dt = clock.tick(53)/ 1000.0
@@ -449,10 +484,34 @@ while running:
                     else:
                         shake = 0.26
                         sound_fail.play()
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_h and game_started and not game_over:
+            for bx in boxes:
+                if not bx.opened and abs(player.x - bx.x) < 40:
+                    bx.opened = True
+                    outcome = random.choice(["time", "time", "penalty", "boost" ])
+                    if outcome == "time":
+                        time_left += 5
+                        box_msg = "BOX: collapsed to +5 seconds!"
+                        sound_trivia_right.play()
+                    elif outcome == "penalty":
+                        time_left = max(1.0, time_left - 4)
+                        box_msg = "BOX: collapsed to -4 seconds..."
+                        sound_trivia_wrong.play()
+                    else:
+                        nxt = next((b for b in barriers if b.x > player.x), None)
+                        if nxt:
+                            nxt.stored = min(1.0, nxt.stored + 0.5)
+                            nxt.flash_timer = 0.5
+                            nxt.flash_color = (253, 211, 92)
+                        box_msg = "BOX: collapsed to a charge boost for the next wall!"
+                        sound_trivia_right.play()
+                    box_msg_timer = 2.6
+                    break
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_p: ##Instead of going with english restart starting with R, i went with hindi
                     if game_over:
                         reset_game()
                         pair_barriers()
+                        make_boxes()
                      
     keys = pygame.key.get_pressed()
     if game_started:
@@ -486,6 +545,9 @@ while running:
         b.x += shake_x
         b.draw(screen, camera_x)
         b.x -= shake_x
+    for bx in boxes:
+        bx.update(dt)
+        bx.draw(screen, camera_x, player.y)
     player.x += shake_x
     player.draw(screen, camera_x)
     player.x -= shake_x
@@ -554,6 +616,15 @@ while running:
         screen.blit(font.render(trivia["q"], True, (255, 220, 120)), (16, 170))
         for i, opt in enumerate(trivia["options"]):
             screen.blit(font.render(f"{i + 1}: {opt}", True, (255, 220, 120)), (16, 194 + i * 22))
+
+    for bx in boxes:
+        if not bx.opened and abs(player.x - bx.x) < 40:
+            hint = font.render("Press h toobserve the box", True, (253, 211, 92))
+            screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT - 60))
+        if box_msg_timer > 0:
+            box_msg_timer -= dt
+            m = font.render(box_msg, True, (253, 211, 92))
+            screen.blit(m, (WIDTH // 2 - m.get_width() // 2, 70))
 
     timer_text = font.render(f"time: {time_left:.1f} score: {score} streak: {streak} best: {best_streak}", True, (142, 255, 125))
     hs_text = font.render(f"high score: {high_score}", True, (255, 230, 90))
