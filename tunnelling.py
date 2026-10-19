@@ -67,6 +67,7 @@ sound_observed = make_tone(330, 0.3, 0.2)
 sound_decohere = make_sweep(700, 60, 0.45)
 sound_ghost = make_sweep(900, 300, 0.4, 0.15)
 sound_trivia_right = make_sweep(500, 900, 0.2)
+sound_trivia_wrong = make_tone(150, 0.3, 0.25)
 sound_entangle = make_sweep(400, 700, 0.15, 0.2)
 
 DECOHERENCE_TIME = 1.2 ##I was thinking of something unique and ended up at my research again
@@ -78,6 +79,8 @@ GHOST_CHARGE = 0.25
 FALLBACK_TRIVIA = {"q": "A thicker barrier makes tunnelling....", "options": ["easier", "harder", "unchanged"], "answer": 0}
 TRIVIA_MODEL = "openai/gpt-oss-120b"
 trivia_fetch = {"status": "idle", "data": None}
+RESONANCE_WIDTH = 0.1
+RESONANCE_PEAK = 0.95
 
 def fetch_trivia():
     trivia_fetch["status"] = "loading"
@@ -133,6 +136,7 @@ class Barrier:
         self.echo = 0.0
         self.link_type = "same"
         self.trivia_energy = 0.0
+        self.sweet_spot = random.uniform(0.3, 0.9)
 
     def update(self, dt, observing):
         decohered_now = False
@@ -226,12 +230,12 @@ class Barrier:
             pygame.draw.circle(surf, (255, 255, 255), (int(orbit_x), int(orbit_y)), 4)
 
     def probability(self):
-        if self.forced is not None:
-            return 1.0 if self.forced else 0.0
         width_units = self.width_px /30
         energy = self.charge * 1.4 + self.trivia_energy
         deficit = max(0.001, self.barrier_height - energy)
         T = math.exp(-2 * width_units * math.sqrt(deficit))
+        resonance = math.exp(-((self.charge - self.sweet_spot) / RESONANCE_WIDTH) ** 2)
+        T = T + max(0.0, RESONANCE_PEAK - T) * resonance
         return max(0.02, min(0.98, T))
 
 NUM_BARRIERS = 5
@@ -253,6 +257,7 @@ def pair_barriers():
         b.hold_at_max = 0.0
         b.observed_this_charge = False
         b.trivia_energy = 0.0
+        b.sweet_shop = random.uniform(0.3, 0.9)
     order = barriers[:]
     random.shuffle(order)
     for k in range(0, len(order) -1, 2):
@@ -617,9 +622,20 @@ while running:
         for i, opt in enumerate(trivia["options"]):
             screen.blit(font.render(f"{i + 1}: {opt}", True, (255, 220, 120)), (16, 194 + i * 22))
 
+    if active_barrier:
+        bar_x, bar_y, bar_w = WIDTH // 2 - 150, HEIGHT - 30, 300
+        pygame.draw.rect(screen, (40, 44, 64), (bar_x, bar_y, bar_w, 12), border_radius=4)
+        pygame.draw.rect(screen, (96, 200, 246), (bar_x, bar_y, int(bar_w * active_barrier.charge), 12), border_radius=4)
+        if active_barrier.observed_this_charge:
+            band = int(bar_w * RESONANCE_WIDTH)
+            tx = bar_x + int(bar_w * active_barrier.sweet_spot)
+            pygame.draw.rect(scree, (255, 210, 90), (tx - band // 2, bar_y - 4, band, 20), 2)
+            lbl = font.render(f"resonance at {active_barrier.sweet_spot:.2f}", True, (255, 210, 90))
+            screen.blit(lbl, (bar_x + bar_w + 12, bar_y - 4))
+
     for bx in boxes:
         if not bx.opened and abs(player.x - bx.x) < 40:
-            hint = font.render("Press h toobserve the box", True, (253, 211, 92))
+            hint = font.render("Press h to observe the box", True, (253, 211, 92))
             screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT - 60))
         if box_msg_timer > 0:
             box_msg_timer -= dt
