@@ -83,6 +83,11 @@ RESONANCE_WIDTH = 0.1
 RESONANCE_PEAK = 0.95
 WAVE_PASS_WIDTH = 80
 WAVE_SPEED = 0.5
+BOSS_LAYERS = 3
+BOSS_FAIL_HEAL = 3
+BOSS_WIDTH = 180
+BOSS_BONUS_SCORE = 10
+BOSS_BONUS_TIME = 10
 
 def fetch_trivia():
     trivia_fetch["status"] = "loading"
@@ -138,6 +143,10 @@ class Barrier:
         self.echo = 0.0
         self.link_type = "same"
         self.trivia_energy = 0.0
+        self.is_boss = False
+        self.max_layers = 1
+        self.full_width = width_px
+        self.defeated = False
         self.sweet_spot = random.uniform(0.3, 0.9)
 
     def update(self, dt, observing):
@@ -177,6 +186,16 @@ class Barrier:
             else:
                 success = random.random() < self.probability()
                 self.flash_color = (53,99,57) if success else (200,60,70)
+                if self.is_boss:
+                    if success:
+                        self.layers -= 1
+                        if self.layers <= 0:
+                            self.defeated = True
+                        else:
+                            self.width_px = self.full_width * self.layers / self.max_layers
+                    else:
+                        self.layers = min(self.max_layers, self.layers + BOSS_FAIL_HEAL)
+                        self.width_px = self.full_width * self.layers / self.max_layers
                 if self.partner:
                     self.partner.stored = self.charge if self.link_type == "same" else 1.0 - self.charge
                     self.partner.flash_timer = 0.5
@@ -194,6 +213,10 @@ class Barrier:
         return success
 
     def draw(self, surf, camera_x):
+        if self.defeated:
+            old = pygame.Rect(self.x - camera_x - self.full_width // 2, HEIGHT * 0.26, self.full_width, HEIGHT * 0.54)
+            pygame.draw.rect(surf, (45, 48, 66), old, 2, border_radius=6)
+            return
         rect = pygame.Rect(self.x - camera_x - self.width_px // 2, HEIGHT * 0.26, self.width_px, HEIGHT * 0.54)
         cold = (96, 200, 246)
         hot = (255, 99, 68)
@@ -224,6 +247,11 @@ class Barrier:
             pygame.draw.line(surf, link, (self.x - camera_x, HEIGHT * 0.53), (self.partner.x - camera_x, HEIGHT * 0.53), 3)
         pygame.draw.rect(surf, (color), rect, border_radius=6)
 
+        if self.is_boss:
+            pygame.draw.rect(surf, (255, 210, 90), rect, 3, border_radius=6)
+            tag = font.render(f"BOSS {self.layers}/{self.max_layers}", True, (255, 210, 90))
+            surf.blit(tag, (self.x - camera_x - tag.get_width() // 2, HEIGHT * 0.26 - 0.26))
+
         num_dots = 7
         for i in range(num_dots):
             dot_angle = self.swirl_angle + (i / num_dots) * math.tau
@@ -248,6 +276,13 @@ for i in range(NUM_BARRIERS):
     barriers.append(Barrier(x=x, width_px=width))
 ## No need to experiment with width,as randomized barriers will generate barriers of different width giving different baseline proabability.
 
+boss = barriers[-1]
+boss.width_px = BOSS_WIDTH
+boss.full_width = BOSS_WIDTH
+boss.is_boss = True
+boss.max_layers = BOSS_LAYERS
+boss.layers = BOSS_LAYERS
+
 def pair_barriers():
     for b in barriers: 
         b.partner = None
@@ -259,6 +294,10 @@ def pair_barriers():
         b.hold_at_max = 0.0
         b.observed_this_charge = False
         b.trivia_energy = 0.0
+        if b.is_boss:
+            b.layers = b.max_layers
+            b_width_px = b.full_width
+            b.defeated = False
         b.sweet_shop = random.uniform(0.3, 0.9)
     order = barriers[:]
     random.shuffle(order)
@@ -291,6 +330,8 @@ class Player:
              self.x += self.speed * dt
         for b in barriers:
             if self.wave_mode and b.width_px < WAVE_PASS_WIDTH:
+                continue
+            if b.defeated:
                 continue
             half = b.width_px / 2 + self.radius
             if old_x <= b.x:
@@ -484,6 +525,17 @@ while running:
             if active_barrier and not game_over and active_barrier.state == "CHARGING":
                 was_observed = active_barrier.observed_this_charge
                 if active_barrier.stop_charging():
+                    if active_barrier.is_boss:
+                        if active_barrier.defeated:
+                            score += BOSS_BONUS_SCORE
+                            time_left += BOSS_BONUS_SCORE
+                            box_msg = f"BOSS DEFEATED! +{BOSS_BONUS_SCORE} score, +{BOSS_BONUS_TIME} seconds"
+                            boss_msg_timer = 3.0
+                        else:
+                            peel = active_barrier.full_width / active_barrier.max_layers / 2
+                            player.x += peel if player.x < active_barrier.x else - peel
+                            box_msg = f"LAYER PEELED - {active_barrier.layers} to go"
+                            box_msg_timer = 2.0
                     if player.x < active_barrier.x:
                         player.x = active_barrier.x + active_barrier.width_px / 2 + player.radius + 5
                     else:
@@ -495,6 +547,9 @@ while running:
                     sound_success.play()
                 else:
                     streak = 0
+                    if active_barrier.is_boss and not was_observed:
+                        box_msg = "THE BOSS REGENERATES!"
+                        box_msg_timer = 2.0
                     if was_observed:
                         freeze = 0.25
                         sound_observed.play()
@@ -662,7 +717,7 @@ while running:
         if active_barrier.observed_this_charge:
             band = int(bar_w * RESONANCE_WIDTH)
             tx = bar_x + int(bar_w * active_barrier.sweet_spot)
-            pygame.draw.rect(scree, (255, 210, 90), (tx - band // 2, bar_y - 4, band, 20), 2)
+            pygame.draw.rect(screen, (255, 210, 90), (tx - band // 2, bar_y - 4, band, 20), 2)
             lbl = font.render(f"resonance at {active_barrier.sweet_spot:.2f}", True, (255, 210, 90))
             screen.blit(lbl, (bar_x + bar_w + 12, bar_y - 4))
 
